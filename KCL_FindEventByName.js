@@ -22,9 +22,9 @@ var KCL = KCL || {};
 
 
 Game_Map.prototype.getEventByName = function(name) { 
-	return this.events().find(function(e) { 
+	return this.events().filter(function(e) { 
 		return e.event().name.toUpperCase() === name.toUpperCase();
-	});
+	})[];
 }
 
 Game_Interpreter.prototype.findEvent = function(eventId) {
