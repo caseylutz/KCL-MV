@@ -5,7 +5,7 @@
 //=============================================================================
 
 /*:
- * @plugindesc Allows events or players to do smart Pathfinding
+ * @plugindesc Allows events or players to set other events' self-switches
  * @author DragoonKain
  *
  * @help
@@ -29,16 +29,16 @@
         sw = args[1];
       }
 
-      var value = 1;
+      var value = true;
       if (args.length > 2) {
         value = args[2];
       }
 
       if (isNaN(value)) {
         if (value.toUpperCase() == 'ON') 
-          value = 1;
+          value = true;
         else if (value.toUpperCase() == 'OFF')
-          value = 0;
+          value = false;
       }
 
       if (target) {

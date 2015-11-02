@@ -24,12 +24,15 @@ var KCL = KCL || {};
 Game_Map.prototype.getEventByName = function(name) { 
 	return this.events().filter(function(e) { 
 		return e.event().name.toUpperCase() === name.toUpperCase();
-	})[];
+	})[0];
 }
 
 Game_Interpreter.prototype.findEvent = function(eventId) {
 	if (!isNaN(eventId))
 		return this.character(eval(eventId));
-	else
-		return $gameMap.event(eventId)||$gameMap.getEventByName(eventId);
+	else {
+		var v = $gameMap.event(eventId)||$gameMap.getEventByName(eventId);
+		if (!v) console.log('FindEventByName: could not locate eventId',eventId);
+		return v;
+	}
 }

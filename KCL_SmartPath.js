@@ -92,8 +92,9 @@
   };
 
   Game_CharacterBase.prototype.isNearTarget = function(x, y) {
-    return Math.abs(this.x - x) <= 1 &&
-           Math.abs(this.y - t) <= 1;
+    var isNear =    Math.abs(this.x - x) <= 1 &&
+                    Math.abs(this.y - y) <= 1;
+    return isNear;
   }
 
   Game_CharacterBase.prototype.isOnTarget = function(x, y) {
@@ -118,15 +119,13 @@
       }
     }
 
-    if (this._targetAutoCancel) {
+    if (this._target && this._targetAutoCancel) {
       if (this._targetAutoCancel.toUpperCase() === 'ON') {
         if (this.isOnTarget(this._targetX, this._targetY)) {
-          console.log('cancelling target');
           this.clearTarget();
         }
       } else if (this._targetAutoCancel.toUpperCase() === 'NEAR') {
         if (this.isNearTarget(this._targetX, this._targetY)) {
-          console.log('cancelling target');
           this.clearTarget();
         }
       }
