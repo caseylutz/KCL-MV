@@ -94,10 +94,8 @@ KCL.Director = KCL.Director || {};
       'THEN': Speech.END
     },
     'preposition': {
-      'FROM': Speech.TARGET,
       'WITH': Speech.WITH,
       'TO': Speech.TARGET,
-      'TOWARD': Speech.TARGET,
       'UNTIL': Speech.CONDITION,
       'FOR': Speech.DURATION,
       'THEN': Speech.END
@@ -645,7 +643,8 @@ KCL.Director = KCL.Director || {};
     if (this.hasAmount() && this.hasUnit()) {
       var conversion = PrepositionalUnitConversions[this.unit]||1;
       return conversion*this.amount;
-    } else return 0;
+    } else 
+      return 1; // powers directionals like LEFT, RIGHT, UP, DOWN
   }
 
 
@@ -706,6 +705,7 @@ KCL.Director = KCL.Director || {};
     this._deferred = [];
     this._unknown = [];
     this._retry = false; // ignore one advance
+    this._previousVerb = undefined;
     this.data = null; // holds data about the active state
   }
 
@@ -769,11 +769,25 @@ KCL.Director = KCL.Director || {};
     this._actors = this._actors.concat(actor);
   }
 
-  Context.prototype.slice = function() {
+  Context.prototype.hasPreviousVerb = function() {
+    return !_.isUndefined(this._previousVerb);
+  }
+
+  Context.prototype.getPreviousVerb = function() {
+    return this._previousVerb;
+  }
+
+  Context.prototype.setPreviousVerb = function(verb) {
+    this._previousVerb = verb;
+  }
+
+  Context.prototype.slice = function(direction) {
     var args = Array.prototype.slice.call(this._args, this._index);
     var context = new Context(args);
     context.addActor(this.getActors());
     context.setState(Speech.VERB);
+    if (direction)
+      context.setPreviousVerb(direction.getVerb());
     return context;
   }
 
@@ -867,7 +881,15 @@ KCL.Director = KCL.Director || {};
             var verb = this.getVerb(context.current());
             if (verb) 
               direction.setVerb(verb);
-            context.setState(Speech.ADVERB); // Advance even if we hit a bad verb.
+            else if (context.hasPreviousVerb) {
+              verb = context.getPreviousVerb();
+              direction.setVerb(verb);
+              context.retry();
+            }
+            if (!_.any(verb.getAdverbs()))
+              context.setState(Speech.DEFAULT);
+            else
+              context.setState(Speech.ADVERB); // Advance even if we hit a bad verb.
             break;
           }
           case Speech.ADVERB: {
