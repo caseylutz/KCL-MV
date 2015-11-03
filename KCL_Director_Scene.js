@@ -137,32 +137,33 @@ KCL.Director = KCL.Director || {};
 
  	function SceneState() {
  		this.directions = [];
+ 		this.commands = [];
  		this.actors = [];
  	}
 
  	SceneState.prototype.current = function() {
- 		return _.first(this.directions);
+ 		return _.first(this.commands);
  	}
 
  	SceneState.prototype.advance = function() {
- 		this.directions.shift();
- 		return _.first(this.directions);
+ 		this.commands.shift();
+ 		return _.first(this.commands);
  	}
 
  	SceneState.prototype.next = function() {
- 		return this.directions[1];  
+ 		return this.commands[1];  
  	}
 
  	SceneState.prototype.push = function(direction) {
- 		return this.directions.push(direction);
+ 		return this.commands.push(direction);
  	}
 
  	SceneState.prototype.hasNext = function() {
- 		return !_.isUndefined(this.directions[1]);
+ 		return !_.isUndefined(this.commands[1]);
  	}
 
  	SceneState.prototype.reset = function() {
- 		this.directions = [];
+ 		this.commands = [];
  		this.actors = [];
  	}
 
@@ -175,6 +176,10 @@ KCL.Director = KCL.Director || {};
  		return this.actors;
  	}
 
+ 	SceneState.prototype.done = function(direction) {
+ 		_.remove(this.directions, direction);
+ 	}
+
  	SceneState.prototype.assign = function(direction) {
  		if (direction.hasActor()) {
  			var actors = direction.getActors().concat(direction.getWith());
@@ -182,8 +187,9 @@ KCL.Director = KCL.Director || {};
  			_.each(actors, function(actor) {
  				actor.state.push(direction);
  			});
+ 			this.directions.push(direction);
  		} else {
- 			this.directions.push(direction);  
+ 			this.commands.push(direction);  
  		}
  	}
 
@@ -244,6 +250,7 @@ KCL.Director = KCL.Director || {};
 			verb: 'FOLLOW',
 			handler: follow,
 			requiresTargetBeforeAdverbs: true,
+			defaultAsync: true,
 			adverbs: ['SLOWLY', 'QUICKLY'],
 			prepositions: []
 		},
@@ -251,6 +258,7 @@ KCL.Director = KCL.Director || {};
 			verb: 'WAIT',
 			handler: wait,
 			requiresTargetBeforeAdverbs: true,
+			defaultAsync: false,
 			adverbs: [],
 			prepositions: []
 		},
@@ -258,6 +266,7 @@ KCL.Director = KCL.Director || {};
 			verb: 'HALT',
 			handler: halt,
 			requiresTargetBeforeAdverbs: false,
+			interrupt: true,
 			adverbs: [],
 			prepositions: []
 		}
@@ -329,6 +338,7 @@ KCL.Director = KCL.Director || {};
 
 		function move(d) {
 			var actors = [];
+
 			if (d.state.getStatus() === KCL.Director.DirectionStates.Init) {
 				d.state.setStatus(KCL.Director.DirectionStates.Running);
 
@@ -357,8 +367,7 @@ KCL.Director = KCL.Director || {};
 					actionState.originalFrequency = actor.actor.moveFrequency();
 					actionState.setStatus(KCL.Director.ActionStates.Running);
 
-					console.log('speed',speed,'frequency',freq);
-					actor.actor.setMoveSpeed(speed);
+					actor.actor.setMoveSpeed(actor.actor.isDashing() ? speed-1 : speed);
 					actor.actor.setMoveFrequency(freq);
 				}).value();
 			} else {
@@ -406,11 +415,12 @@ KCL.Director = KCL.Director || {};
 
 					if (actionTarget) {
 						var coords = actionTarget.coords();
+						var curPos = actor.coords();
 						direction = actor.actor.findDirectionTo(coords.x, coords.y);
-						var passable = $gameMap.isPassable(coords.x,coords.y,direction)&&!_.any($gameMap.eventsXyNt(coords.x, coords.y));
+						var passable = actor.actor.canPass(curPos.x,curPos.y,direction);
 						var done = passable 
-						? coords.equals(actor.coords())
-						: coords.near(actor.coords());
+							? coords.equals(actor.coords())
+							: coords.near(actor.coords());
 						if (!done)
 							actor.actor.moveStraight(direction);
 						else {
@@ -427,11 +437,11 @@ KCL.Director = KCL.Director || {};
 		}
 
 		function moveComplete(d, actor) {
+			console.log('move complete');
 			if (actor) {
-				console.log('move complete');
-
-				var actionState = d.actionState(actor);
+				var actionState = d.state.actionState(actor);
 				if (_.has(actionState, 'originalSpeed')) {
+					console.log('setting speed back to original speed',actionState.originalSpeed);
 					actor.actor.setMoveSpeed(actionState.originalSpeed);
 					actor.actor.setMoveFrequency(actionState.originalFrequency);
 				}
@@ -532,7 +542,7 @@ KCL.Director = KCL.Director || {};
 			var actor = this.getGameActor(target);
 			if (actor) {
 				if (!actor._actor) 
-					actor._actor = new KCL.Director.Actor(actor);
+					actor._actor = new KCL.Director.Actor(actor, target);
 				return actor._actor;
 			} 
 			else return undefined;
@@ -574,15 +584,14 @@ KCL.Director = KCL.Director || {};
 		}
 	}
 
-	SceneDirector.prototype.fromString = function(string) {
-		var context = KCL.Director.Context.prototype.fromString(string);
-		if (context.current() == 'DIRECT') {
+	SceneDirector.prototype.fromString = function(str) {
+		var strings = _.isArray(str) ? str : [str];
+		_.each(strings, function(string) {
+			var context = KCL.Director.Context.prototype.fromString(string);
+			context.directedTo(context.current());
 			context.advance();
 			KCL.Director.$.direct(context);
-		} else if (context.current() == 'DIRECTOR') {
-			context.advance();
-			KCL.Director.$.command(context);
-		}
+		})
 	}
 
 	SceneDirector.prototype.direct = function(context) {
@@ -592,12 +601,13 @@ KCL.Director = KCL.Director || {};
 		}
 		
 		var direction = this.parse(context);
+		var toDirector = context.directedTo() === KCL.Director.DirectedTo.Director;
 
-		if (direction.hasVerb() && direction.hasActor()) {
+		if (direction.hasVerb() && (toDirector||direction.hasActor())) {
 			console.log('director :: parse complete', direction);
 			this.scene.assign(direction);
 		} else {
-			if (!direction.hasActor()) 
+			if (!toDirector && !direction.hasActor()) 
 				console.warn('Failed to process direction "%s" because an actor could not be identified', context.args().join(" "));
 			else if (!direction.hasVerb()) 
 				console.warn('Failed to process direction "%s" because no valid verb was identified.', context.args().join(" "));
@@ -605,46 +615,13 @@ KCL.Director = KCL.Director || {};
 		}
 
 		if (context.hasMore()) {
-			this.direct(context.slice(direction)); // start a new context, carry in our current actors, set state to VERB.
-		}
-
-	}
-
-	SceneDirector.prototype.command = function(context) {
-
-		if (!context.current()) {
-			console.log('Failed to process direction "%s" because nothing was supplied.', context.args().join(" "));
-		}
-
-		context.setState(KCL.Director.Speech.VERB);
-
-		var direction = this.parse(context);
-
-		if (direction.hasVerb()) {
-			console.log('director :: parse complete', direction);
-			this.scene.assign(direction);
-		} else {
-			if (!direction.hasVerb())
-				console.warn('Failed to process direction "%s" because no valid verb was identified.', context.args().join(" "));
-		}
-
-		if (context.hasMore()) {
-			this.command(context.slice(direction));
+			this.direct(context.splitFrom(direction)); // start a new context, carry in our current actors, set state to VERB.
 		}
 
 	}
 
 	SceneDirector.prototype.changeScene = function() {
 		this.scene = new SceneState();
-	}
-
-	SceneDirector.prototype.pendingDirections = function(status) {
-		return _(this.scene.actors) 
-		.filter(function(a) {
-			return a.state.current() && a.state.current().state.getStatus() === status 
-		})
-		.map(function(a) { return a.state.current() })
-		.uniq();
 	}
 
 	SceneDirector.prototype.tick = function() {
@@ -655,31 +632,41 @@ KCL.Director = KCL.Director || {};
 		}
 
 		// process actor directions
-		_(this.scene.actors)
-		.filter(function(actor) { return !!actor.state.current() })
-		.map(function(actor) { return actor.state.current().state.actionState(actor) })
-		.filter(function(actionState) { return actionState.getStatus() == KCL.Director.ActionStates.Done })
-		.each(function(actionState) {
-			var actor = actionState.actor; // ugly
-			var direction = actor.state.current(); // uglier.
+		_(this.scene.directions)
+		.takeWhile(function(direction, idx) {
+			return idx==0 ||
+			direction.isAsync() ||
+			_.every(_.values(direction.state.actors), function(actor) {
+				return !actor.state.current()
+			})
+		})
+		.each(function(direction) {
+			_(direction.state.actionState())
+			.values()
+			.filter(function(actionState) { return actionState.getStatus() == KCL.Director.ActionStates.Done })
+			.each(function(actionState) {
+				var actor = actionState.actor;
 
-			if (direction.getVerb().actionStateComplete)
-				direction.getVerb().actionStateComplete.call(this, d, actor);
+				if (direction.getVerb().actionStateComplete)
+					direction.getVerb().actionStateComplete.call(this, direction, actor);
 
-			actor.state.advance();
+				actor.state.advance();
 
-			direction.state.actorDone(actor);
+				direction.state.actorDone(actor);
 
-			console.log('finishing');
+				console.log('finishing');
 
-			if (!direction.state.hasAnyActors()) 
-				direction.state.setStatus(KCL.Director.DirectionStates.Done);
+				if (!direction.state.hasAnyActors()) 
+					direction.state.setStatus(KCL.Director.DirectionStates.Done);
+			}, this).value();
 		}, this).value();
 
 		// clean up any directions which have finished
-		this.pendingDirections(KCL.Director.DirectionStates.Done) 
+		_(this.scene.directions) 
+		.filter(function(d) {
+			return d.state.status === KCL.Director.DirectionStates.Done 
+		})
 		.each(function(d) {
-			console.log('direction done');
 			_(d.state.actors)
 			.map(function(a) { return a.actor })
 			.each(function(actor) {
@@ -689,23 +676,40 @@ KCL.Director = KCL.Director || {};
 					actor.state.advance();
 			})
 			.value();
+			this.scene.done(d);
 		}, this).value();
 
 		// check any delayed directions
-		this.pendingDirections(KCL.Director.DirectionStates.Delayed)
+		_(this.scene.directions) 
+		.filter(function(d) {
+			return d.state.status === KCL.Director.DirectionStates.Delayed 
+		})
 		.each(function(d) {
 			// check the Conditions to see if the status should change
 			// to init
 		}).value();
 
 		// check directions that are stuck in wait() status
-		this.pendingDirections(KCL.Director.DirectionStates.Waiting) 
+		_(this.scene.directions) 
+		.filter(function(d) {
+			return d.state.status === KCL.Director.DirectionStates.Waiting 
+		})
 		.each(function(d) {
 			d.getVerb().getHandler().call(this, d);
 		}).value();
 
 		// check directions that need to be initialized()
-		this.pendingDirections(KCL.Director.DirectionStates.Init)
+		_(this.scene.directions) 
+		.takeWhile(function(direction, idx) {
+			return idx==0 ||
+			direction.isAsync() ||
+			_.every(_.values(direction.state.actors), function(actor) {
+				return !actor.state.current()
+			})
+		})
+		.filter(function(d) {
+			return d.state.status == KCL.Director.DirectionStates.Init 
+		})
 		.each(function(d) {
 			d.getVerb().getHandler().call(this, d);
 		}).value();
@@ -720,12 +724,65 @@ KCL.Director = KCL.Director || {};
 				)
 			) {
 			var actionState = current.state.actionState(actor);
-		if (actionState.getStatus() != KCL.Director.ActionStates.Done) {
-			current.state.setStatus(KCL.Director.DirectionStates.Waiting);
-			actionState.setStatus(KCL.Director.ActionStates.Triggered);
+			if (actionState.getStatus() != KCL.Director.ActionStates.Done) {
+				current.state.setStatus(KCL.Director.DirectionStates.Waiting);
+				actionState.setStatus(KCL.Director.ActionStates.Triggered);
+			}
 		}
 	}
-}
+
+	SceneDirector.prototype.describeScene = function() {
+		console.log('Scene');
+
+		if (this.scene.current()) {
+			console.log('Scene Commands');
+			console.log(
+				_.map(this.state.commands, function(direction) {
+					return {
+						'verb': direction.getVerb().verb,
+						'status': direction.state.getStatus()
+					}
+				}));
+		}
+
+		if (_.any(this.scene.actors)) {
+			console.log('Scene Actors');
+			_(this.scene.actors)
+				.map(function(actor) {
+					return {
+						'id': actor.id(),
+						'name': actor.getName(),
+						'commands': actor.state.directions.length,
+						'current': actor.state.current()?actor.state.current():'nothing',
+					}					
+				})
+				.tap(function(actors) { console.log(actors)})
+				.value();
+		}
+
+		if (_.any(this.scene.directions)) {
+			console.log('Directions');
+			_(this.scene.directions) 
+				.each(function(direction, idx) {
+					console.log('direction',idx);
+					console.log({
+						'verb': direction.getVerb().verb,
+						'status': direction.state.getStatus()
+					});
+					_(direction.state.actionState())
+						.values()
+						.map(function(actionState) {
+							return {
+								'actor': actionState.actor.getName(),
+								'status': actionState.getStatus()
+							}
+						})
+						.tap(function(actionStates) {console.log(actionStates)})
+						.value();
+				})
+				.value();
+		}
+	}
 
 	// Teach the Director how to get the location of an Actor.
 	KCL.Director.Actor.prototype.coords = function() {
@@ -858,9 +915,9 @@ KCL.Director = KCL.Director || {};
 		_Game_Interpreter_pluginCommand.call(this, command, args);
 
 		if (command.toUpperCase() === 'DIRECT') {
-			KCL.Director.$.direct(KCL.Director.Context.prototype.fromPluginArgs(args));
+			KCL.Director.$.direct(KCL.Director.Context.prototype.fromPluginArgs(args).directedTo(KCL.Director.DirectedTo.Direct));
 		} else if (command.toUpperCase() === 'DIRECTOR') {
-			KCL.Director.$.command(KCL.Director.Context.Context.prototype.fromPluginArgs(args));
+			KCL.Director.$.direct(KCL.Director.Context.prototype.fromPluginArgs(args).directedTo(KCL.Director.DirectedTo.Director));
 		}
 	};
 
