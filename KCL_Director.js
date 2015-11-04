@@ -149,8 +149,8 @@ KCL.Director = KCL.Director || {};
   }
 
   var DirectedTo = {
-    Direct: 'direct',
-    Director: 'director'
+    Direct: 'DIRECT',
+    Director: 'DIRECTOR'
   }
                            
   var AND = 'AND';
@@ -605,7 +605,7 @@ KCL.Director = KCL.Director || {};
   function DirectionState() {
     this.status = DirectionStates.Init;
     this.data = {};
-    this.actors = {};
+    this._actionStates = {};
   }
 
   DirectionState.prototype.getStatus = function() {
@@ -617,22 +617,22 @@ KCL.Director = KCL.Director || {};
   }
 
   DirectionState.prototype.actionState = function(actor) {
-    if (_.isUndefined(actor)) return this.actors;
+    if (_.isUndefined(actor)) return this._actionStates;
 
-    var actionState = this.actors[actor.id()];
+    var actionState = this._actionStates[actor.id()];
     if (!actionState) {
       actionState = new ActionState(actor);
-      this.actors[actor.id()] = actionState;
+      this._actionStates[actor.id()] = actionState;
     }
     return actionState;
   }
 
   DirectionState.prototype.actorDone = function(actor) {
-    delete this.actors[actor.id()];
+    delete this._actionStates[actor.id()];
   }
 
   DirectionState.prototype.hasAnyActors = function() {
-    return _.any(this.actors);
+    return _.any(this._actionStates);
   }
 
   // A prepositional phrase is going to declare in what direction,
@@ -758,6 +758,8 @@ KCL.Director = KCL.Director || {};
     this._retry = false; // ignore one advance
     this._previousVerb = undefined;
     this._isDeferred = false;
+    this._requestAsync = false;
+    this._chained = false;
     this.data = null; // holds data about the active state
   }
 
@@ -817,7 +819,9 @@ KCL.Director = KCL.Director || {};
     this._state = state;
     this.data = null;
     if (_.any(this._deferred)) {
-      Array.prototype.splice.apply(this._args, [this._index+1, 0].concat(this._deferred));
+      if (this._state != Speech.END) {
+        Array.prototype.splice.apply(this._args, [this._index+1, 0].concat(this._deferred));
+      }
       this._deferred = [];
     }
   }
@@ -853,6 +857,8 @@ KCL.Director = KCL.Director || {};
     context.addActor(this.getActors());
     context.setState(Speech.VERB);
     context.directedTo(this.directedTo());
+    context.setRequestingAsync(this.isRequestingAsync());
+    context._chained = true;
     return context;
   }
 
@@ -879,6 +885,18 @@ KCL.Director = KCL.Director || {};
   Context.prototype.addUnknown = function(wordOrWords) {
     this._unknown = this._unknown.concat(wordOrWords);
     return this;
+  }
+
+  Context.prototype.isRequestingAsync = function() {
+    return this._requestAsync;
+  }
+
+  Context.prototype.setRequestingAsync = function (yesNo) {
+    this._requestAsync = yesNo;
+  }
+
+  Context.prototype.isChained = function() {
+    return this._chained;
   }
 
   function Director() {
@@ -936,6 +954,11 @@ KCL.Director = KCL.Director || {};
   Director.prototype.parse = function(context) {
     var direction = new Direction(context.getActors(), context);
 
+    if (context.isRequestingAsync()) {
+      direction.setAsync(context.isRequestingAsync);
+      context.setRequestingAsync(false);
+    }
+
     while (context.getState() != Speech.END && context.hasMore()) {
       if (!this.isFiller(context)) {
         this.contextSwitch(context);
@@ -961,14 +984,17 @@ KCL.Director = KCL.Director || {};
             var verb = this.getVerb(context.current());
             if (verb) 
               direction.setVerb(verb);
-            else if (context.hasPreviousVerb) {
+            else if (context.isChained && this.getActor(context.current())) {
+              context.setState(Speech.ACTOR);
+              context.retry();
+            } else if (context.hasPreviousVerb) {
               verb = context.getPreviousVerb();
               direction.setVerb(verb);
-              direction.setAsync(verb.defaultAsync);
+              direction.setAsync(direction.isAsync()||verb.defaultAsync);
               context.retry();
             }
             if (verb) {
-              if (!_.any(verb.getAdverbs()))
+              if (!_.any(verb.getAdverbs()) || verb.requiresTargetBeforeAdverbs)
                 context.setState(Speech.DEFAULT);
               else
                 context.setState(Speech.ADVERB); // Advance even if we hit a bad verb.
@@ -1055,7 +1081,10 @@ KCL.Director = KCL.Director || {};
               // skip the 'and' and stay in this context to look for another target
               context.advance();
             } else {
-              context.setState(Speech.DEFAULT);
+              if (direction.hasVerb() && direction.getVerb().requiresTargetBeforeAdverbs) 
+                context.setState(Speech.ADVERB);
+              else
+                context.setState(Speech.DEFAULT);
             }
 
             break;
@@ -1093,7 +1122,7 @@ KCL.Director = KCL.Director || {};
             break;
           }
           case Speech.END_ASYNC: {
-            direction.setAsync(true);
+            context.setRequestingAsync(true);
             context.setState(Speech.END);
             break;
           }
