@@ -139,6 +139,8 @@ KCL.Director = KCL.Director || {};
  		this.directions = [];
  		this.commands = [];
  		this.actors = [];
+
+ 		this.wait = false;
  	}
 
  	SceneState.prototype.reset = function() {
@@ -164,7 +166,7 @@ KCL.Director = KCL.Director || {};
  	}
 
  	SceneState.prototype.assign = function(direction) {
- 		if (direction.hasActor()) {
+ 		if (direction.hasActor() && direction.getContext().directedTo() === KCL.Director.DirectedTo.Actor) {
  			var actors = direction.getActors().concat(direction.getWith());
  			this.activate(actors);
  			_.each(actors, function(actor) {
@@ -255,6 +257,19 @@ KCL.Director = KCL.Director || {};
 			interrupt: true,
 			adverbs: [],
 			prepositions: []
+		},
+		{
+			verb: 'DEFINE',
+			handler: define,
+			adverbs: ['GROUP'],
+			contextSwitches: {
+				'default': {
+					'NAMED': KCL.Director.Speech.TOKEN
+				},
+				'token': {
+					'AS': KCL.Director.Speech.TARGET
+				}
+			}
 		}
 		];
 
@@ -519,11 +534,82 @@ KCL.Director = KCL.Director || {};
 		}
 
 		function wait(d) {
-			console.log('game_director :: wait', d);
+			if (d.state.getStatus() == KCL.Director.DirectionStates.Init) {
+				d.state.setStatus(KCL.Director.DirectionStates.Waiting);
+				if (d.getContext().directedTo() === KCL.Director.DirectedTo.Actor) {
+					var actors = d.getActors().concat(d.getWith());
+					_.each(actors, function(actor) {
+						var actionState = d.actionState(actor);
+
+						actionState.setStatus(KCL.Director.ActionStates.Running);
+					});
+				}					
+			}
+
+			if (d.getContext().directedTo() === KCL.Director.DirectedTo.Actor) {
+				var actors = d.getActors().concat(d.getWith());
+				_.each(actors, function(actor) {
+					var actionState = d.actionState(actor);
+
+					if (d.hasTarget()) {
+						// we want to wait for all target(s) to have no running/triggered actionStates.
+						var done = _(d.getTargets())
+							.filter(function(target) { return target.hasActor(); })
+							.map(function(target) { return target.getActor() })
+							.map(function(actor) { return actor.state.directions })
+							.flatten()
+							.map(function(direction) { return direction.state.actionState() })
+							.reject(function(direction) { return direction === d })
+							.every(function(actionState) {
+								var status = actionState.getStatus();
+								return status != KCL.Director.ActionStates.Running && status != KCL.Director.ActionStates.Triggered
+							});
+						if (done) 
+							actionState.setStatus(KCL.Director.ActionStates.Done);
+					} else {
+						done = _.every(this.scene.directions, function(direction) {
+								var status = direction.state.getStatus();
+								return status != KCL.Director.DirectionStates.Running && status != KCL.Director.DirectionStates.Waiting
+							});
+						if (done) 
+							actionState.setStatus(KCL.Director.ActionStates.Done);						
+					}
+				})
+			} else {
+				var done = true;
+				if (d.hasTarget()) {
+					done = _(d.getTargets())
+						.filter(function(target) { return target.hasActor(); })
+						.map(function(target) { return target.getActor() })
+						.map(function(actor) { return actor.state.directions })
+						.flatten()
+						.map(function(direction) { return direction.state.actionState() })
+						.reject(function(direction) { return direction === d })
+						.every(function(actionState) {
+							var status = actionState.getStatus();
+							return status != KCL.Director.ActionStates.Running && status != KCL.Director.ActionStates.Triggered
+						});
+					if (done) 
+						actionState.setStatus(KCL.Director.ActionStates.Done);
+				} else {
+					done = _(this.scene.directions)
+						.reject(function(direction) { return direction === d })
+						.every(function(direction) {
+							var status = direction.state.getStatus();
+							return status != KCL.Director.DirectionStates.Running && status != KCL.Director.DirectionStates.Waiting
+						});
+				}
+				this.scene.wait = !done;
+				if (done) 
+					d.state.setStatus(KCL.Director.DirectionStates.Done);
+			}
 		}
 
 		function halt(d) {
-			if (d._context.directedTo() === KCL.Director.DirectedTo.Director) {
+			if (d.state.getStatus() == KCL.Director.DirectionStates.Init)
+				d.state.setStatus(KCL.Director.DirectionStates.Running);
+
+			if (d.getContext().directedTo() === KCL.Director.DirectedTo.Director) {
 				if (!d.hasTarget()) {
 					// this is easy - burn the world!
 					_(this.scene.directions) 
@@ -552,6 +638,24 @@ KCL.Director = KCL.Director || {};
 				.each(function(actionState) {
 					actionState.setStatus(KCL.Director.ActionStates.Done);
 				}).value();
+			}
+			d.state.setStatus(KCL.Director.DirectionStates.Done);
+		}
+
+		function define(d) {
+			if (d.getContext().directedTo() === KCL.Director.DirectedTo.Director) {
+				if (_.contains(d.getAdverbs(), 'GROUP')) {
+					var groupName = _.first(d.getTokens());
+					if (groupName) {
+						if (d.hasTarget()) {
+							this.defineSpecialTarget(groupName, function(){return d.getTargets()});
+						} else {
+							console.warn('director :: define "group" could not identify any targets');
+						}
+					} else {
+						console.warn('director :: define "group" must specify a group name');
+					}
+				}
 			}
 			d.state.setStatus(KCL.Director.DirectionStates.Done);
 		}
@@ -626,7 +730,10 @@ KCL.Director = KCL.Director || {};
 		var strings = _.isArray(str) ? str : [str];
 		_.each(strings, function(string) {
 			var context = KCL.Director.Context.prototype.fromString(string);
-			context.directedTo(context.current());
+			var directTo = context.current() === 'DIRECT' 
+				? KCL.Director.DirectedTo.Actor
+				: KCL.Director.DirectedTo.Director;
+			context.directedTo(directTo);
 			context.advance();
 			KCL.Director.$.direct(context);
 		})
@@ -644,6 +751,7 @@ KCL.Director = KCL.Director || {};
 
 		var direction = this.parse(context);
 		
+		toDirector = context.directedTo() === KCL.Director.DirectedTo.Director; // this can change during parse		
 
 		if (direction.hasVerb() && (toDirector||direction.hasActor())) {
 			console.log('director :: parse complete', direction);
@@ -657,7 +765,7 @@ KCL.Director = KCL.Director || {};
 		}
 
 		if (context.hasMore()) {
-			this.direct(context.splitFrom(direction)); // start a new context, carry in our current actors, set state to VERB.
+			this.direct(context.slice()); // start a new context, carry in our current actors, set state to VERB.
 		}
 
 	}
@@ -766,13 +874,15 @@ KCL.Director = KCL.Director || {};
 		}).value();
 
 		// check directions that need to be initialized()
-		this.pendingDirections()
-		.filter(function(d) {
-			return d.state.status == KCL.Director.DirectionStates.Init 
-		})
-		.each(function(d) {
-			d.getVerb().getHandler().call(this, d);
-		}).value();
+		if (!this.scene.wait) {
+			this.pendingDirections()
+			.filter(function(d) {
+				return d.state.status == KCL.Director.DirectionStates.Init 
+			})
+			.each(function(d) {
+				d.getVerb().getHandler().call(this, d);
+			}).value();
+		}
 	}
 
 	SceneDirector.prototype.actorTick = function(actor) {
@@ -975,7 +1085,7 @@ KCL.Director = KCL.Director || {};
 		_Game_Interpreter_pluginCommand.call(this, command, args);
 
 		if (command.toUpperCase() === 'DIRECT') {
-			KCL.Director.$.direct(KCL.Director.Context.prototype.fromPluginArgs(args).directedTo(KCL.Director.DirectedTo.Direct));
+			KCL.Director.$.direct(KCL.Director.Context.prototype.fromPluginArgs(args).directedTo(KCL.Director.DirectedTo.Actor));
 		} else if (command.toUpperCase() === 'DIRECTOR') {
 			KCL.Director.$.direct(KCL.Director.Context.prototype.fromPluginArgs(args).directedTo(KCL.Director.DirectedTo.Director));
 		}
