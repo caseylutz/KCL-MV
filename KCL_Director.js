@@ -105,26 +105,30 @@ KCL.Director = KCL.Director || {};
       'TO': Speech.TARGET,
       'UNTIL': Speech.CONDITION,
       'FOR': Speech.DURATION,
-      'THEN': Speech.END
+      'THEN': Speech.END,
+      'WHILE': Speech.END_ASYNC
     }
   };
 
   var PrepositionalUnits = [
+    'SQUARE',
     'SQUARES',
+    'SPACE',
     'SPACES',
     'BLOCKS',
+    'TILE',
+    'TILES',
+    'FOOT',
     'FEET',
+    'METER',
     'METERS',
+    'STEP',
     'STEPS',
   ];
 
   var PrepositionalUnitConversions = {
-    'SQUARES': 1,
-    'SPACES': 1,
-    'BLOCKS': 1,
-    'FEET': 1,
+    'METER': 3,
     'METERS': 3,
-    'STEPS': 1
   };
 
   var DurationUnits = [
@@ -281,9 +285,78 @@ KCL.Director = KCL.Director || {};
     return this._config.contextSwitch;
   }
 
+  var ConditionComparator = {
+    IS: 'IS',
+    EQ: 'EQUALS',
+    LT: 'LESSTHAN',
+    GT: 'GREATERTHAN',
+  }
+
   // An Condition specifies a conditional reason to end a direction.
   function Condition() {
+    this._next = undefined;
+    this._target = undefined;
+    this._comparator = undefined;
+    this._value = undefined;
+    this._preposition = undefined;
+  }
 
+  Condition.prototype.hasNext = function() { 
+    return !!this._next;
+  }
+
+  Condition.prototype.getNext = function() {
+    return this._next;
+  }
+
+  Condition.prototype.next = function(comparator, condition) {
+    this._next = condition;
+  }
+
+  Condition.prototype.isValid = function() {
+    return this._target && this._comparator && this._value &&
+           this._target.isActor();
+  }
+
+  Condition.prototype.hasTarget = function() {
+    return !!this._target;
+  }
+
+  Condition.prototype.getTarget = function() {
+    return this._target;
+  }
+
+  Condition.prototype.setTarget = function(target) {
+    this._target = target;
+  }
+
+  Condition.prototype.setComparator = function(comparator) {
+    this._comparator = comparator;
+  }
+
+  Condition.prototype.setValue = function(value) {
+    this._value = value;
+  }
+
+  Condition.prototype.isMet = function(actor, direction) {
+    if (!this.isValid()) return true;
+
+    var target = this.getTarget().getActor();
+
+    switch (this._comparator) {
+      case ConditionComparator.IS: {
+        if (this._value === ActionStates.Done.toUpperCase()) {
+          // see if the target is done
+          var actionStates = _(target.state.actionStates)
+            .values()
+            .takeWhile(function(actionState) { return actionState._direction !== direction })
+            .value();
+          return !_.any(actionStates) ||
+            _.every(actionStates, function(actionState) { return actionState.getStatus() === ActionStates.Done });
+        } 
+        break;
+      }
+    }
   }
 
   // Used to generate a Director object or obtain the current Singleton.
@@ -338,6 +411,9 @@ KCL.Director = KCL.Director || {};
 
   function ActorState() {
     this.directions = [];
+    this.actionStates = {
+
+    }
   }
 
   ActorState.prototype.current = function() {
@@ -359,6 +435,18 @@ KCL.Director = KCL.Director || {};
 
   ActorState.prototype.hasNext = function() {
     return !_.isUndefined(this.directions[1]);
+  }
+
+  ActorState.prototype.actionState = function(direction, state) {
+    this.actionStates[direction._id] = state;
+  }
+
+  ActorState.prototype.actionStateComplete = function(direction) {
+    delete this.actionStates[direction._id];
+  }
+
+  ActorState.prototype.getActionStates = function() {
+    return this.actionStates;
   }
 
   // Used to store information about the target Target of the current
@@ -426,6 +514,14 @@ KCL.Director = KCL.Director || {};
                  // no mutation occurred
   }
 
+  Target.prototype.isActor = function() {
+    return !!this._actor;
+  }
+
+  Target.prototype.getActor = function() { 
+    return this._actor;
+  }
+
   function Coords(x, y) {
     this.x = x;
     this.y = y;
@@ -449,8 +545,8 @@ KCL.Director = KCL.Director || {};
   // A stage direction is a collection of properties extrapolated from
   // a command context. This collection of properties can be used to 
   // process a command on an actor.
-  function Direction(actors, context) {
-    this._actors = actors||[];
+  function Direction(context) {
+    this._actors = [];
     this._verb = undefined;
     this._adverbs = [];
     this._condition = undefined;
@@ -463,11 +559,16 @@ KCL.Director = KCL.Director || {};
     this._repeat = undefined;
     this._async = false;
     this._tokens = [];
-    this.state = new DirectionState();
+    this._id = _.uniqueId();
+    this.state = new DirectionState(this);
   }
 
   Direction.prototype.setActors = function(actors) {
     this._actors = actors;
+  }
+
+  Direction.prototype.clearActors = function() {
+    this._actors = [];
   }
 
   Direction.prototype.addActor = function(actor) {
@@ -618,7 +719,8 @@ KCL.Director = KCL.Director || {};
     return this._context;
   }
 
-  function ActionState(actor) {
+  function ActionState(actor, direction) {
+    this._direction = direction;
     this.status = ActionStates.Init;
     this.data = {};
     this.actor = actor;
@@ -632,8 +734,10 @@ KCL.Director = KCL.Director || {};
     this.status = status;
   }
 
-  function DirectionState() {
+  function DirectionState(direction) {
+    this._direction = direction;
     this.status = DirectionStates.Init;
+    this.waitOn = true;
     this.data = {};
     this._actionStates = {};
   }
@@ -651,8 +755,9 @@ KCL.Director = KCL.Director || {};
 
     var actionState = this._actionStates[actor.id()];
     if (!actionState) {
-      actionState = new ActionState(actor);
+      actionState = new ActionState(actor, this._direction);
       this._actionStates[actor.id()] = actionState;
+      actor.state.actionState(this._direction, actionState);
     }
     return actionState;
   }
@@ -663,6 +768,13 @@ KCL.Director = KCL.Director || {};
 
   DirectionState.prototype.hasAnyActors = function() {
     return _.any(this._actionStates);
+  }
+
+  DirectionState.prototype.shouldWaitOn = function(waitOn) {
+    if (_.isUndefined(waitOn))
+      return this.waitOn;
+    else
+      this.waitOn = waitOn;
   }
 
   // A prepositional phrase is going to declare in what direction,
@@ -771,7 +883,6 @@ KCL.Director = KCL.Director || {};
   }
 
   function Delay() {
-    this._condition = undefined;
     this._duration = undefined;
   }
 
@@ -885,8 +996,10 @@ KCL.Director = KCL.Director || {};
     this._state = state;
     this.data = null;
     if (_.any(this._deferred)) {
-      if (this._state != Speech.END) {
+      if (this._state != Speech.END && this._state != Speech.END_ASYNC) {
         Array.prototype.splice.apply(this._args, [this._index+1, 0].concat(this._deferred));
+      } else {
+        this.addUnknown(this._deferred);
       }
       this._deferred = [];
     }
@@ -985,6 +1098,7 @@ KCL.Director = KCL.Director || {};
     this._specialTargets = {};
     this._verbs = {};
     this._prepositions = {};
+    this._debug = true;
   }
 
   Director.prototype.getActor = function(target) {
@@ -1031,11 +1145,15 @@ KCL.Director = KCL.Director || {};
   }
 
   Director.prototype.parse = function(context) {
-    var direction = new Direction(context.getActors(), context);
+    var direction = new Direction(context);
 
     if (context.isRequestingAsync()) {
       direction.setAsync(context.isRequestingAsync);
       context.setRequestingAsync(false);
+    }
+
+    if (context.isChained() && _.any(context.getActors()) && !this.getActor(context.current())) {
+      direction.setActors(context.getActors());
     }
 
     while (context.getState() != Speech.END && context.hasMore()) {
@@ -1074,16 +1192,18 @@ KCL.Director = KCL.Director || {};
             } else if (context.hasPreviousVerb()) {
               verb = context.getPreviousVerb();
               direction.setVerb(verb);
-              direction.setAsync(direction.isAsync()||verb.defaultAsync);
               context.retry();
+            } else {
+              context.setState(Speech.DEFAULT);
             }
+
             if (verb) {
+              direction.setAsync(direction.isAsync()||verb.defaultAsync);
+
               if (!_.any(verb.getAdverbs()) || verb.requiresTargetBeforeAdverbs)
                 context.setState(Speech.DEFAULT);
               else
                 context.setState(verb.initialState);
-            } else {
-              context.setState(Speech.DEFAULT);
             }
             break;
           }
@@ -1195,10 +1315,20 @@ KCL.Director = KCL.Director || {};
           case Speech.CONDITION: {
             if (!context.data) {
               context.data = new Condition();
+              direction.setCondition(context.data);
             } else {
-              // god help me
               var condition = context.data;
-              direction.setCondition(condition);
+
+              if (!condition.hasTarget()) {
+                condition.setTarget(this.getTarget(context.current()));
+              } else if (!condition._comparator) {
+                condition.setComparator(context.current())
+              } else if (!condition._value) {
+                condition.setValue(context.current());
+              }
+
+              if (condition.isValid()) 
+                context.setState(Speech.DEFAULT);
             }
             break;
           }
@@ -1280,5 +1410,14 @@ KCL.Director = KCL.Director || {};
     return fillerWords 
       ? _.contains(fillerWords, context.current())
       : false;
+  }
+
+  Director.prototype.isDebug = function() {
+    return this._debug;
+  }
+
+  Director.prototype.debug = function() {
+    if (this.isDebug())
+      console.log.apply(console, arguments);
   }
 })();
