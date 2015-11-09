@@ -105,7 +105,6 @@ KCL.Director = KCL.Director || {};
  *   MOVE
  *   WALK
  *   RUN
- *   DANCE
  *   FACE
  *   TURN
  *   FOLLOW
@@ -811,26 +810,34 @@ KCL.Director = KCL.Director || {};
 	}
 
 	SceneDirector.prototype.tick = function() {
-		// clean up any directions which are finished
-		this.cleanUpStageDirections();
+		if (this.scene.directions.length > 0) {
 
-		// clean up completed actionStates
-		this.cleanUpActionStates();
-		
-		// clean up any directions which have finished
-		this.cleanUpDirections();
+			// clean up any directions which are finished
+			this.cleanUpStageDirections();
 
-		// check any delayed directions
-		this.checkDelays();
+			// clean up completed actionStates
+			this.cleanUpActionStates();
+			
+			// clean up any directions which have finished
+			this.cleanUpDirections();
 
-		// check directions that are stuck in wait() status
-		this.updateWaiting();
+			// check any delayed directions
+			this.checkDelays();
 
-		// check directions that need to be initialized()
-		this.initDirections();
+			// check directions that are stuck in wait() status
+			this.updateWaiting();
 
-		// execute scene commands waiting execution
-		this.updateStageDirections();
+			// check directions that need to be initialized()
+			this.initDirections();
+
+		}
+
+		if (this.scene.commands.length > 0) {
+
+			// execute scene commands waiting execution
+			this.updateStageDirections();
+
+		}
 
 		if (this.scene.wait) {
 			$gameMap._interpreter.wait(1);
@@ -1142,8 +1149,6 @@ KCL.Director = KCL.Director || {};
 	var _Game_Interpreter_pluginCommand = Game_Interpreter.prototype.pluginCommand;
 	Game_Interpreter.prototype.pluginCommand = function(command, args) {
 		_Game_Interpreter_pluginCommand.call(this, command, args);
-
-		console.log('plugin_command', args);
 
 		if (command.toUpperCase() === 'DIRECT') {
 			KCL.Director.$.direct(KCL.Director.Context.prototype.fromPluginArgs(args).directedTo(KCL.Director.DirectedTo.Actor));
