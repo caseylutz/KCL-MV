@@ -145,6 +145,7 @@ KCL.Director = KCL.Director || {};
  		this.directions = [];
  		this.commands = [];
  		this.actors = [];
+ 		this.gameCharacters = {};
 
  		this.wait = false;
  	}
@@ -194,6 +195,14 @@ KCL.Director = KCL.Director || {};
  				this.actors.push(actor);
  			}
  		}
+ 	}
+
+ 	SceneState.prototype.getActorForCharacter = function(gameCharacter) {
+ 		return this.gameCharacters[gameCharacter._guid];
+ 	}
+
+ 	SceneState.prototype.setActorForCharacter = function(gameCharacter, actor) {
+ 		this.gameCharacters[gameCharacter._guid] = actor;
  	}
 
 
@@ -863,11 +872,14 @@ KCL.Director = KCL.Director || {};
 	SceneDirector.prototype.getActor = function(target) {
 		var actor = KCL.Director.Director.prototype.getActor.apply(this, arguments);
 		if (!actor) {
-			var actor = this.getGameActor(target);
-			if (actor) {
-				if (!actor._actor) 
-					actor._actor = new SceneActor(actor, target);
-				return actor._actor;
+			var gameCharacter = this.getGameActor(target);
+			if (gameCharacter) {
+				var actor = this.scene.getActorForCharacter(gameCharacter);
+				if (!actor) {
+					actor = new SceneActor(gameCharacter, target);
+					this.scene.setActorForCharacter(gameCharacter, actor);
+				}
+				return actor;
 			} 
 			else return undefined;
 		}
@@ -1163,7 +1175,7 @@ KCL.Director = KCL.Director || {};
 	Game_CharacterBase.prototype.initMembers = function() {
 		_Game_CharacterBase_initMembers.call(this);
 
-		this._actor = undefined;
+		this._guid = _.uniqueId();
 	};
 
 	var _Game_Interpreter_setup = Game_Interpreter.prototype.setup;
@@ -1184,8 +1196,9 @@ KCL.Director = KCL.Director || {};
 	Game_CharacterBase.prototype.updateStop = function() {
 		_Game_CharacterBase_updateStop.call(this);
 
-		if (this._actor)
-			KCL.Director.$.actorTick(this._actor);
+		var actor = KCL.Director.$.scene.getActorForCharacter(this);
+		if (actor)
+			KCL.Director.$.actorTick(actor);
 	};
 
 	var _Game_Map_initialize = Game_Map.prototype.initialize;

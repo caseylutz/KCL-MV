@@ -347,9 +347,9 @@ KCL.Director = KCL.Director || {};
       case ConditionComparator.IS: {
         if (this._value === ActionStates.Done.toUpperCase()) {
           // see if the target is done
-          var actionStates = _(target.state.actionStates)
-            .values()
-            .takeWhile(function(actionState) { return actionState._direction !== direction })
+          var actionStates = _(target.state.getDirections())
+            .filter(function(actorDirection) { return actorDirection !== direction })
+            .map(function(actorDirection) { return actorDirection.actionState(actor) })
             .value();
           return !_.any(actionStates) ||
             _.every(actionStates, function(actionState) { return actionState.getStatus() === ActionStates.Done });
@@ -411,9 +411,6 @@ KCL.Director = KCL.Director || {};
 
   function ActorState() {
     this.directions = [];
-    this.actionStates = {
-
-    }
   }
 
   ActorState.prototype.current = function() {
@@ -437,16 +434,14 @@ KCL.Director = KCL.Director || {};
     return !_.isUndefined(this.directions[1]);
   }
 
-  ActorState.prototype.actionState = function(direction, state) {
-    this.actionStates[direction._id] = state;
-  }
-
-  ActorState.prototype.actionStateComplete = function(direction) {
-    delete this.actionStates[direction._id];
+  ActorState.prototype.getDirections = function() {
+    return this.directions;
   }
 
   ActorState.prototype.getActionStates = function() {
-    return this.actionStates;
+    return _(this.directions)
+      .map(function(direction) { return direction.actionState(this) })
+      .value();
   }
 
   // Used to store information about the target Target of the current
@@ -719,8 +714,7 @@ KCL.Director = KCL.Director || {};
     return this._context;
   }
 
-  function ActionState(actor, direction) {
-    this._direction = direction;
+  function ActionState(actor) {
     this.status = ActionStates.Init;
     this.data = {};
     this.actor = actor;
@@ -755,9 +749,8 @@ KCL.Director = KCL.Director || {};
 
     var actionState = this._actionStates[actor.id()];
     if (!actionState) {
-      actionState = new ActionState(actor, this._direction);
+      actionState = new ActionState(actor);
       this._actionStates[actor.id()] = actionState;
-      actor.state.actionState(this._direction, actionState);
     }
     return actionState;
   }
