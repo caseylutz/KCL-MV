@@ -10,6 +10,10 @@
  *
  * @help
  *
+ * This is merely a fork of Shaz's SMARTPATH plugin. I've added some extra
+ * functionality to be able to auto-cancel the pathfinding as well as to 
+ * have the event interpreter WAIT while the pathing takes place.
+ *
  * Plugin Command:
  *  SmartPath eventId1 eventId2      # Makes event 1 find path to event 2
  *  SmartPath eventId x y            # Makes event find a path to location x, y
