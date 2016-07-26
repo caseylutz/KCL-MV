@@ -105,8 +105,8 @@
   };
 
   Game_CharacterBase.prototype.isNearTarget = function(x, y) {
-    var isNear =    Math.abs(this.x - x) <= _targetAutoCancelThreshold &&
-                    Math.abs(this.y - y) <= _targetAutoCancelThreshold;
+    var isNear =    Math.abs(this.x - x) <= this._targetAutoCancelThreshold &&
+                    Math.abs(this.y - y) <= this._targetAutoCancelThreshold;
     return isNear;
   }
 
