@@ -94,6 +94,10 @@
     this._targetAutoCancel = targetAutoCancel;
   }
 
+  Game_CharacterBase.prototype.setTargetAutoCancelThreshold = function(threshold) {
+    this._targetAutoCancelThreshold = threshold;
+  }
+
   Game_CharacterBase.prototype.clearTarget = function() {
     this._target = null;
     this._targetX = null;
