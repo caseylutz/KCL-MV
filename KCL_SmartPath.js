@@ -52,6 +52,10 @@
         subject.setTargetAutoCancel('on');
       } else if (args[1].toUpperCase() == 'AUTO_CANCEL_NEAR') {
         subject.setTargetAutoCancel('near');
+
+        if (args.length > 2) {
+          subject.setTargetAutoCancelThreshold(parseInt(args[2]));
+        }
       } else if (args.length > 2) {
         subject.setTarget(null, eval(args[1]), eval(args[2]));
       } else {
@@ -70,6 +74,7 @@
     this._targetX = null;
     this._targetY = null;
     this._targetAutoCancel = false; // 'on', 'near', false
+    this._targetAutoCancelThreshold = 1;
     this._break = false;
   };
 
@@ -96,8 +101,8 @@
   };
 
   Game_CharacterBase.prototype.isNearTarget = function(x, y) {
-    var isNear =    Math.abs(this.x - x) <= 1 &&
-                    Math.abs(this.y - y) <= 1;
+    var isNear =    Math.abs(this.x - x) <= _targetAutoCancelThreshold &&
+                    Math.abs(this.y - y) <= _targetAutoCancelThreshold;
     return isNear;
   }
 
